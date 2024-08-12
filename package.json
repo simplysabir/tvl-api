@@ -25,6 +25,7 @@
     "@nestjs/platform-express": "^10.3.10",
     "@solana/spl-governance": "^0.3.28",
     "@solana/web3.js": "^1.95.2",
+    "dotenv": "^16.4.5",
     "node-fetch": "^3.3.2",
     "pg": "^8.12.0",
     "reflect-metadata": "^0.2.0",
