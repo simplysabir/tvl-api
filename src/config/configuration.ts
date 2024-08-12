@@ -6,8 +6,11 @@ export default () => {
 
   return {
     port: parseInt(process.env.PORT, 10) || 3000,
-    database: {
-      connectionString: process.env.DB_CONNECTION_STRING,
-    },
+    host: process.env.HOST || '',
+    dbPort: parseInt(process.env.DB_PORT, 10) || 5432,
+    user: process.env.USER || '',
+    password: process.env.PASSWORD || '',
+    database: process.env.DATABASE || '',
+    rpcUrl: process.env.RPC_URL,
   };
 };

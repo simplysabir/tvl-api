@@ -9,14 +9,20 @@ export class DatabaseService {
 
   constructor() {
     this.pool = new Pool({
-      connectionString: configuration().database.connectionString,
-      ssl: { rejectUnauthorized: false },
+      host: configuration().host,
+      port: configuration().dbPort,
+      user: configuration().user,
+      password: configuration().password,
+      database: configuration().database,
     });
 
     this.pool.on('error', (err) => {
       this.logger.error('Unexpected error on idle client', err);
       process.exit(-1);
     });
+  }
+  async onModuleInit() {
+    await this.initializeDatabase();
   }
 
   async query(text: string, params?: any[]) {
