@@ -1,74 +1,159 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="200" alt="Nest Logo" /></a>
-</p>
+# TVL API
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+This API calculates and stores the Total Value Locked (TVL) of Realms, i.e., the total value of SOL and SPL tokens kept in the treasury of all the DAOs in USD value. It fetches and stores the data in a PostgreSQL database, updating it daily through a scheduled job.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://coveralls.io/github/nestjs/nest?branch=master" target="_blank"><img src="https://coveralls.io/repos/github/nestjs/nest/badge.svg?branch=master#9" alt="Coverage" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+## Features
 
-## Description
+- Fetches the total value of SOL and SPL tokens for DAOs.
+- Stores the data in a PostgreSQL database.
+- Provides endpoints to retrieve the latest TVL and trigger manual updates.
+- Scheduled cron job for daily TVL updates.
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+## Technologies Used
 
-## Installation
+- [NestJS](https://nestjs.com/): A progressive Node.js framework for building efficient and scalable server-side applications.
+- [PostgreSQL](https://www.postgresql.org/): An open-source relational database management system.
+- [Solana Web3.js](https://solana-labs.github.io/solana-web3.js/): A library for interacting with the Solana blockchain.
+- [Axios](https://axios-http.com/): A promise-based HTTP client for the browser and Node.js.
 
-```bash
-$ yarn install
+## Prerequisites
+
+- [Node.js](https://nodejs.org/) v14 or later
+- [PostgreSQL](https://www.postgresql.org/) installed and running
+
+## Environment Variables
+
+Create a `.env` file in the root directory and set the following variables:
+
+```plaintext
+PORT=3000                  # API port
+RPC_URL=https://api.mainnet-beta.solana.com # Solana RPC URL
+HOST=localhost             # PostgreSQL host
+DB_PORT=5432               # PostgreSQL port
+USER=your_db_user          # PostgreSQL user
+PASSWORD=your_db_password  # PostgreSQL password
+DATABASE=your_db_name      # PostgreSQL database name
 ```
 
-## Running the app
+ ## Installation
+### Clone the repository:
 
 ```bash
-# development
-$ yarn run start
-
-# watch mode
-$ yarn run start:dev
-
-# production mode
-$ yarn run start:prod
+git clone https://github.com/yourusername/tvl-api.git
+cd tvl-api
 ```
-
-## Test
+### Install dependencies:
 
 ```bash
-# unit tests
-$ yarn run test
+yarn install
+Run the database migration to create the necessary tables:
 
-# e2e tests
-$ yarn run test:e2e
-
-# test coverage
-$ yarn run test:cov
+The tables are automatically created on the first run of the application.
 ```
 
-## Support
+### Start the application:
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+```bash
+yarn start
+``` 
 
-## Stay in touch
+## API Endpoints
 
-- Author - [Kamil Myśliwiec](https://kamilmysliwiec.com)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+### Base URL
 
-## License
+```bash
+The API base URL is determined by your server configuration, defaulting to http://localhost:3000.
+```
 
-Nest is [MIT licensed](LICENSE).
-# tvl-api
+### GET /tvl/latest
+```bash
+Retrieve the latest Total Value Locked (TVL) data from the database.
+
+URL: /tvl/latest
+
+Method: GET
+
+Response:
+
+200 OK: Returns the latest TVL data.
+500 Internal Server Error: An error occurred while fetching the data.
+Example Response:
+
+{
+  "totalValueUsd": 1000000.50,
+  "lastUpdated": "2024-08-12T00:00:00.000Z"
+}
+```
+
+### GET /tvl/update
+```bash
+Manually trigger the TVL update process.
+
+URL: /tvl/update
+
+Method: GET
+
+Response:
+
+200 OK: Indicates that the TVL update was initiated.
+500 Internal Server Error: An error occurred while initiating the update.
+Example Response:
+
+{
+  "message": "TVL update initiated"
+}
+```
+
+### GET /
+```bash
+Basic health check endpoint to verify the API is running.
+
+URL: /
+
+Method: GET
+
+Response:
+
+200 OK: Returns a simple welcome message.
+Example Response:
+
+Hello World!
+```
+
+### GET /health
+```bash
+Health check endpoint to confirm API operational status.
+
+URL: /health
+
+Method: GET
+
+Response:
+
+200 OK: Returns a message confirming API health.
+Example Response:
+
+API is up and running!
+```
+
+## Scheduled Tasks
+```bash
+The API includes a scheduled task that automatically updates the TVL data every day at 1 AM.
+
+Schedule: Daily at 1 AM
+Configuration: Managed by @nestjs/schedule
+```
+
+## Configuration
+```plaintext
+The application uses a configuration service that reads environment variables to set up the database connection and other necessary settings. Ensure that your .env file is properly configured before running the application.
+```
+
+## Troubleshooting
+```plaintext
+If you encounter issues starting the server or connecting to the database:
+
+Ensure PostgreSQL is running and the connection details in your .env file are correct.
+Check for any error logs in the terminal where you are running the application.
+Verify that your Solana RPC URL is accessible.
+```

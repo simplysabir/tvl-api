@@ -102,7 +102,7 @@ export class TvlService {
 
   @Cron(CronExpression.EVERY_DAY_AT_1AM) // Runs at midnight on the every day
   async handleCron() {
-    this.logger.debug('Running scheduled monthly TVL update');
+    this.logger.debug('Running scheduled daily TVL update');
     await this.updateTvl();
   }
 }
