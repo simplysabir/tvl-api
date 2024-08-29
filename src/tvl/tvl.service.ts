@@ -20,6 +20,12 @@ export class TvlService {
   private readonly logger = new Logger(TvlService.name);
   private connection: Connection;
 
+  // In-memory cache for token prices
+  private tokenPriceCache: {
+    [key: string]: { price: number; timestamp: number };
+  } = {};
+  private readonly cacheTtl = 600000; // Cache TTL in milliseconds (e.g., 10 mins)
+
   constructor(private readonly dbService: DatabaseService) {
     this.connection = new Connection(configuration().rpcUrl, 'confirmed');
   }
@@ -200,13 +206,28 @@ export class TvlService {
   }
 
   private async fetchTokenPrice(mintAddress: string): Promise<number> {
+    const now = Date.now();
+    if (
+      this.tokenPriceCache[mintAddress] &&
+      now - this.tokenPriceCache[mintAddress].timestamp < this.cacheTtl
+    ) {
+      // Return the cached price if it's still within the TTL
+      this.logger.debug(`Using cached price for ${mintAddress}`);
+      return this.tokenPriceCache[mintAddress].price;
+    }
+
     try {
       await this.sleep(500); // Delay before each price fetch request
       const response = await this.withRetry(() =>
         axios.get(`https://price.jup.ag/v4/price?ids=${mintAddress}`),
       );
       const data = response.data;
-      return data?.data[mintAddress]?.price || 0;
+      const price = data?.data[mintAddress]?.price || 0;
+
+      // Cache the fetched price
+      this.tokenPriceCache[mintAddress] = { price, timestamp: now };
+
+      return price;
     } catch (error) {
       this.logger.error(`Error fetching price for ${mintAddress}`, error);
       return 0;
