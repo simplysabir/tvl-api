@@ -104,6 +104,26 @@ Example Response:
 }
 ```
 
+### GET /tvl/latest/:governanceId
+```bash
+Gives total value associated with the governance id
+
+URL: /tvl/latest/:governanceId
+
+Method: GET
+
+Response:
+
+200 OK: Indicates that the TVL data sent
+500 Internal Server Error: An error occurred while calculating.
+Example Response:
+
+{
+    "daoGovernanceProgramId": "GMnke6kxYvqoAXgbFGnu84QzvNHoqqTnijWSXYYTFQbB",
+    "totalValue": "130261.54"
+}
+```
+
 ### GET /
 ```bash
 Basic health check endpoint to verify the API is running.
