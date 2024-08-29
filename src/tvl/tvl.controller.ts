@@ -1,4 +1,4 @@
-import { Controller, Get, Logger } from '@nestjs/common';
+import { Controller, Get, Param, Logger } from '@nestjs/common';
 import { TvlService } from './tvl.service';
 
 @Controller('tvl')
@@ -8,31 +8,45 @@ export class TvlController {
   constructor(private readonly tvlService: TvlService) {}
 
   @Get('latest')
-  async getLatestTvl() {
+  async getLatestAllTvl() {
     try {
-      const latestTvl = await this.tvlService.getLatestTvl();
-      if (latestTvl) {
-        return {
-          totalValueUsd: latestTvl.value,
-          lastUpdated: latestTvl.calculated_at,
-        };
+      const totalValueUsd = await this.tvlService.getLatestAllTvl();
+      if (totalValueUsd !== null) {
+        return { totalValueUsd };
       } else {
         return { error: 'TVL data not available' };
       }
     } catch (error) {
-      this.logger.error('Error fetching latest TVL', error);
+      this.logger.error('Error fetching latest total TVL', error);
       return { error: 'Error fetching TVL' };
     }
   }
 
   @Get('update')
-  async updateTvl() {
+  async updateAllTvl() {
     try {
-      await this.tvlService.updateTvl();
-      return { message: 'TVL update initiated' };
+      const totalValueUsd = await this.tvlService.updateAllTvl();
+      return { message: 'Total TVL updated successfully', totalValueUsd };
     } catch (error) {
-      this.logger.error('Error initiating TVL update', error);
-      return { error: 'Error initiating TVL update' };
+      this.logger.error('Error updating total TVL', error);
+      return { error: 'Error updating TVL' };
+    }
+  }
+
+  @Get('latest/:governanceId')
+  async getTvlByGovernanceId(@Param('governanceId') governanceId: string) {
+    try {
+      const totalValue = await this.tvlService.calculateTvlForDao(governanceId);
+      return {
+        daoGovernanceProgramId: governanceId,
+        totalValue: totalValue.toFixed(2),
+      };
+    } catch (error) {
+      this.logger.error(
+        `Error fetching TVL for governance ID ${governanceId}`,
+        error,
+      );
+      return { error: 'Error fetching TVL' };
     }
   }
 }

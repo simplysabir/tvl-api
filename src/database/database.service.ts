@@ -43,6 +43,16 @@ export class DatabaseService {
         calculated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
+
+    await this.query(`
+      CREATE TABLE IF NOT EXISTS dao_tvl (
+        id SERIAL PRIMARY KEY,
+        dao_id VARCHAR(255) NOT NULL,
+        value NUMERIC,
+        calculated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
     this.logger.log('Database initialized');
   }
 }

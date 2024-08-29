@@ -8,6 +8,11 @@ import {
   SOL_MINT,
   TOKEN_PROGRAM_ID,
 } from '../constants/index';
+import {
+  getAllGovernances,
+  getNativeTreasuryAddress,
+  getRealms,
+} from '@solana/spl-governance';
 import { Cron, CronExpression } from '@nestjs/schedule';
 
 @Injectable()
@@ -19,71 +24,186 @@ export class TvlService {
     this.connection = new Connection(configuration().rpcUrl, 'confirmed');
   }
 
-  async updateTvl() {
-    try {
-      const totalTvl = await this.calculateTvl();
-      await this.dbService.query('INSERT INTO tvl (value) VALUES ($1)', [
-        totalTvl,
-      ]);
-      this.logger.log('TVL updated successfully');
-    } catch (error) {
-      this.logger.error('Error updating TVL', error);
-    }
+  // Utility function to introduce a delay
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
-  private async calculateTvl(): Promise<number> {
-    let totalTvl = 0;
-    for (const programId of GOVERNANCE_PROGRAM_IDS) {
-      const governanceAccounts = await this.getGovernanceAccounts(programId);
-      for (const account of governanceAccounts) {
-        totalTvl += await this.calculateAccountTvl(account);
+  // Exponential backoff retry logic
+  private async withRetry<T>(
+    fn: () => Promise<T>,
+    retries = 5,
+    delay = 500,
+  ): Promise<T> {
+    try {
+      return await fn();
+    } catch (error) {
+      if (retries > 0 && error.response?.status === 429) {
+        this.logger.warn(`Retrying after ${delay}ms due to rate limit...`);
+        await this.sleep(delay);
+        return this.withRetry(fn, retries - 1, delay * 2); // Increase delay for each retry
+      } else {
+        throw error;
       }
     }
-    return totalTvl;
   }
 
-  private async getGovernanceAccounts(programId: string): Promise<PublicKey[]> {
-    const accounts = await this.connection.getProgramAccounts(
-      new PublicKey(programId),
-      {
-        filters: [{ dataSize: 325 }],
-      },
-    );
-    return accounts.map((account) => account.pubkey);
-  }
+  // Update the total TVL for all DAOs
+  async updateAllTvl(): Promise<number> {
+    try {
+      const results = [];
+      for (const daoGovernanceProgramId of GOVERNANCE_PROGRAM_IDS) {
+        const tvl = await this.calculateTvlForDao(daoGovernanceProgramId);
+        results.push(tvl);
+        await this.sleep(2000); // 2-second delay between DAO calculations
+      }
 
-  private async calculateAccountTvl(
-    governancePubkey: PublicKey,
-  ): Promise<number> {
-    let accountTvl = 0;
-    const tokenAccounts = await this.connection.getParsedTokenAccountsByOwner(
-      governancePubkey,
-      {
-        programId: TOKEN_PROGRAM_ID,
-      },
-    );
+      // Calculate the total TVL sum
+      const totalValue = results.reduce((sum, tvl) => sum + tvl, 0).toFixed(2);
 
-    for (const account of tokenAccounts.value) {
-      const mintAddress = account.account.data.parsed.info.mint;
-      const amount = parseFloat(
-        account.account.data.parsed.info.tokenAmount.amount,
+      // Store the total TVL in the database
+      await this.dbService.query(
+        `INSERT INTO tvl (value, calculated_at) VALUES ($1, NOW())`,
+        [totalValue],
       );
-      const price = await this.fetchTokenPrice(mintAddress);
-      const value = amount * price;
-      accountTvl += value;
+
+      this.logger.log('Total TVL for all DAOs updated successfully');
+      return parseFloat(totalValue);
+    } catch (error) {
+      this.logger.error('Error updating total TVL for all DAOs', error);
+      throw error;
+    }
+  }
+
+  // Get the latest total TVL for all DAOs
+  async getLatestAllTvl() {
+    const result = await this.dbService.query(
+      `SELECT value, calculated_at FROM tvl ORDER BY calculated_at DESC LIMIT 1`,
+    );
+    return result.rows.length > 0 ? parseFloat(result.rows[0].value) : null;
+  }
+
+  // Calculate TVL for a specific DAO by governance ID
+  async calculateTvlForDao(daoGovernanceProgramId: string): Promise<number> {
+    // First, check if we have a recent entry in the database for this DAO
+    const result = await this.dbService.query(
+      `SELECT value, calculated_at FROM dao_tvl WHERE dao_id = $1 ORDER BY calculated_at DESC LIMIT 1`,
+      [daoGovernanceProgramId],
+    );
+
+    if (result.rows.length > 0) {
+      // If the latest entry is found, return it
+      const latestEntry = result.rows[0];
+      this.logger.log(`Returning cached TVL for DAO ${daoGovernanceProgramId}`);
+      return parseFloat(latestEntry.value);
     }
 
-    const solBalance = await this.connection.getBalance(governancePubkey);
-    const solPrice = await this.fetchTokenPrice(SOL_MINT);
-    accountTvl += (solBalance * solPrice) / 1e9; // Convert lamports to SOL
+    // If no entry is found, calculate the TVL and store it
+    this.logger.log(`Calculating TVL for DAO ${daoGovernanceProgramId}`);
+    console.log(`Calculating TVL for DAO ${daoGovernanceProgramId}`);
+    let totalValue = 0;
 
-    return accountTvl;
+    const realms = await this.getRealms(new PublicKey(daoGovernanceProgramId));
+    console.log('realms', realms.length);
+
+    // Process realms in batches
+    const batchSize = 25;
+    for (let i = 0; i < realms.length; i += batchSize) {
+      const realmBatch = realms.slice(i, i + batchSize);
+
+      const batchResults = [];
+      for (const realm of realmBatch) {
+        const realmValue = await this.withRetry(() =>
+          this.calculateRealmTvl(realm),
+        );
+        console.log('realmValue', realmValue);
+        console.log('index is', realmBatch.indexOf(realm));
+        batchResults.push(realmValue);
+        await this.sleep(2000); // 2-second delay between realm calculations
+      }
+
+      // Sum up the results from the batch
+      totalValue += batchResults.reduce((sum, value) => sum + value, 0);
+    }
+
+    // Store the DAO-specific TVL in the database
+    await this.dbService.query(
+      `INSERT INTO dao_tvl (dao_id, value, calculated_at) VALUES ($1, $2, NOW())`,
+      [daoGovernanceProgramId, totalValue],
+    );
+
+    return totalValue;
+  }
+
+  private async calculateRealmTvl(realm: any): Promise<number> {
+    const treasuryAddresses = await this.getTreasuryAddresses(realm);
+
+    let totalValue = 0;
+
+    for (const address of treasuryAddresses) {
+      await this.sleep(500); // Delay before each balance request
+      const solBalanceLamports = await this.withRetry(() =>
+        this.connection.getBalance(new PublicKey(address)),
+      );
+      await this.sleep(500); // Delay before each price fetch
+      const solPrice = await this.withRetry(() =>
+        this.fetchTokenPrice(SOL_MINT),
+      );
+      const solBalance = solBalanceLamports / 1_000_000_000; // Convert lamports to SOL
+      totalValue += solBalance * solPrice;
+
+      await this.sleep(500); // Delay before fetching token accounts
+      const tokenAccounts = await this.withRetry(() =>
+        this.connection.getParsedTokenAccountsByOwner(new PublicKey(address), {
+          programId: TOKEN_PROGRAM_ID,
+        }),
+      );
+
+      for (const { account } of tokenAccounts.value) {
+        const mintAddress = account.data.parsed.info.mint;
+        const balance = account.data.parsed.info.tokenAmount.uiAmount;
+        await this.sleep(500); // Delay before fetching each token price
+        const price = await this.withRetry(() =>
+          this.fetchTokenPrice(mintAddress),
+        );
+        totalValue += balance * price;
+      }
+    }
+
+    return totalValue;
+  }
+
+  private async getRealms(programId: PublicKey) {
+    await this.sleep(500); // Delay before fetching realms
+    return await getRealms(this.connection, programId);
+  }
+
+  private async getTreasuryAddresses(realm: any) {
+    await this.sleep(500); // Delay before fetching governances
+    const governances = await getAllGovernances(
+      this.connection,
+      new PublicKey(realm.owner.toBase58()),
+      new PublicKey(realm.pubkey.toBase58()),
+    );
+
+    const treasuryAddresses = await Promise.all(
+      governances.map(async (governance) => {
+        await this.sleep(500); // Delay before fetching each treasury address
+        return getNativeTreasuryAddress(
+          new PublicKey(realm.owner.toBase58()),
+          governance.pubkey,
+        );
+      }),
+    );
+
+    return treasuryAddresses;
   }
 
   private async fetchTokenPrice(mintAddress: string): Promise<number> {
     try {
-      const response = await axios.get(
-        `https://price.jup.ag/v4/price?ids=${mintAddress}`,
+      await this.sleep(500); // Delay before each price fetch request
+      const response = await this.withRetry(() =>
+        axios.get(`https://price.jup.ag/v4/price?ids=${mintAddress}`),
       );
       const data = response.data;
       return data?.data[mintAddress]?.price || 0;
@@ -93,16 +213,25 @@ export class TvlService {
     }
   }
 
-  async getLatestTvl() {
-    const result = await this.dbService.query(
-      'SELECT value, calculated_at FROM tvl ORDER BY calculated_at DESC LIMIT 1',
-    );
-    return result.rows.length > 0 ? result.rows[0] : null;
+  @Cron(CronExpression.EVERY_1ST_DAY_OF_MONTH_AT_MIDNIGHT) // Runs at midnight on the first day of every month
+  async updatingAllTvl() {
+    try {
+      this.logger.debug('Running scheduled monthly TVL update');
+      await this.updateAllTvl();
+    } catch (error) {
+      this.logger.error('Error updating total TVL for all DAOs', error);
+    }
   }
 
-  @Cron(CronExpression.EVERY_DAY_AT_1AM) // Runs at midnight on the every day
-  async handleCron() {
-    this.logger.debug('Running scheduled daily TVL update');
-    await this.updateTvl();
+  @Cron(CronExpression.EVERY_1ST_DAY_OF_MONTH_AT_MIDNIGHT) // Runs at midnight on the first day of every month
+  async updatingEachDaoTvl() {
+    try {
+      for (const daoGovernanceProgramId of GOVERNANCE_PROGRAM_IDS) {
+        await this.calculateTvlForDao(daoGovernanceProgramId);
+        await this.sleep(2000); // 2-second delay between DAO updates
+      }
+    } catch (error) {
+      this.logger.error('Error updating TVL for all DAOs', error);
+    }
   }
 }
