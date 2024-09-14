@@ -26,6 +26,15 @@ export class TvlService {
   } = {};
   private readonly cacheTtl = 600000; // Cache TTL in milliseconds (e.g., 10 mins)
 
+  // Map to store token details for logging later
+  private tokenDetailsMap: Map<
+    string,
+    { balance: number; price: number; value: number }
+  > = new Map();
+
+  // Map to store treasury addresses for logging later
+  private treasuryAddressesMap: Map<string, PublicKey[]> = new Map();
+
   constructor(private readonly dbService: DatabaseService) {
     this.connection = new Connection(configuration().rpcUrl, 'confirmed');
   }
@@ -63,6 +72,12 @@ export class TvlService {
         results.push(tvl);
         await this.sleep(2000); // 2-second delay between DAO calculations
       }
+
+      // Log all unique token details
+      this.logTokenDetails();
+
+      // Log all treasury addresses
+      this.logTreasuryAddresses();
 
       // Calculate the total TVL sum
       const totalValue = results.reduce((sum, tvl) => sum + tvl, 0).toFixed(2);
@@ -106,7 +121,6 @@ export class TvlService {
 
     // If no entry is found, calculate the TVL and store it
     this.logger.log(`Calculating TVL for DAO ${daoGovernanceProgramId}`);
-    console.log(`Calculating TVL for DAO ${daoGovernanceProgramId}`);
     let totalValue = 0;
 
     const realms = await this.getRealms(new PublicKey(daoGovernanceProgramId));
@@ -118,18 +132,34 @@ export class TvlService {
       const realmBatch = realms.slice(i, i + batchSize);
 
       const batchResults = [];
+      const treasuryAddressesBatch: PublicKey[] = [];
+
       for (const realm of realmBatch) {
         const realmValue = await this.withRetry(() =>
           this.calculateRealmTvl(realm),
         );
         console.log('realmValue', realmValue);
-        console.log('index is', realmBatch.indexOf(realm));
         batchResults.push(realmValue);
+        treasuryAddressesBatch.push(
+          ...(await this.getTreasuryAddresses(realm)),
+        );
         await this.sleep(2000); // 2-second delay between realm calculations
       }
 
       // Sum up the results from the batch
       totalValue += batchResults.reduce((sum, value) => sum + value, 0);
+
+      // Store the treasury addresses for this DAO
+      this.treasuryAddressesMap.set(
+        daoGovernanceProgramId,
+        treasuryAddressesBatch,
+      );
+
+      // Log all unique token details
+      this.logTokenDetails();
+
+      // Log all treasury addresses
+      this.logTreasuryAddresses();
     }
 
     // Store the DAO-specific TVL in the database
@@ -156,7 +186,11 @@ export class TvlService {
         this.fetchTokenPrice(SOL_MINT),
       );
       const solBalance = solBalanceLamports / 1_000_000_000; // Convert lamports to SOL
-      totalValue += solBalance * solPrice;
+      const solValue = solBalance * solPrice;
+
+      this.addTokenDetail(SOL_MINT, solBalance, solPrice, solValue);
+
+      totalValue += solValue;
 
       await this.sleep(500); // Delay before fetching token accounts
       const tokenAccounts = await this.withRetry(() =>
@@ -172,11 +206,51 @@ export class TvlService {
         const price = await this.withRetry(() =>
           this.fetchTokenPrice(mintAddress),
         );
-        totalValue += balance * price;
+        const tokenValue = balance * price;
+
+        this.addTokenDetail(mintAddress, balance, price, tokenValue);
+
+        totalValue += tokenValue;
       }
     }
 
     return totalValue;
+  }
+
+  private addTokenDetail(
+    mintAddress: string,
+    balance: number,
+    price: number,
+    value: number,
+  ) {
+    if (!this.tokenDetailsMap.has(mintAddress)) {
+      this.tokenDetailsMap.set(mintAddress, { balance, price, value });
+    } else {
+      const existingDetails = this.tokenDetailsMap.get(mintAddress);
+      this.tokenDetailsMap.set(mintAddress, {
+        balance: (existingDetails?.balance || 0) + balance,
+        price: existingDetails?.price || price, // Price remains the same
+        value: (existingDetails?.value || 0) + value,
+      });
+    }
+  }
+
+  private logTokenDetails() {
+    this.logger.log('Logging token details for all processed tokens:');
+    this.tokenDetailsMap.forEach((details, mintAddress) => {
+      this.logger.log(
+        `Token: ${mintAddress}, Total Balance: ${details.balance.toFixed(6)}, Price: ${details.price.toFixed(2)}, Total Value: ${details.value.toFixed(2)}`,
+      );
+    });
+  }
+
+  private logTreasuryAddresses() {
+    this.logger.log('Logging treasury addresses for all processed DAOs:');
+    this.treasuryAddressesMap.forEach((addresses, daoGovernanceProgramId) => {
+      this.logger.log(
+        `DAO Governance Program ID: ${daoGovernanceProgramId}, Treasury Addresses: ${addresses.join(', ')}`,
+      );
+    });
   }
 
   private async getRealms(programId: PublicKey) {
